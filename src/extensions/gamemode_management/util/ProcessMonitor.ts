@@ -12,20 +12,96 @@ import { BrowserWindow, remote } from 'electron';
 import * as path from 'path';
 import * as Redux from 'redux';
 import * as winapi from 'winapi-bindings';
+import * as fs from 'fs';
 
+
+// ---- Platform Abstraction ----
+interface IProcessInfo {
+  // Should be compatible with winapi.ProcessEntry
+  processID: number;
+  parentProcessID: number;
+  exeFile: string;
+}
+
+interface IProcessMonitorImpl {
+  getProcessList(): IProcessInfo[];
+}
+
+class ProcessMonitorImplWin32 implements IProcessMonitorImpl{
+  getProcessList = winapi.GetProcessList;
+}
+
+class ProcessMonitorImplProcfs implements IProcessMonitorImpl {
+  private proc_path: string = "/proc";
+
+  private isOnlyDigits(s: string): boolean {
+    const zero = '0'.codePointAt(0);
+    const nine = '9'.codePointAt(0);
+    for (let i=0; i<s.length; i++) {
+      const c = s.codePointAt(i);
+      if (c < zero || c > nine)
+        return false;
+    }
+    return true;
+  }
+
+  getProcessInfo(pid: number|string): IProcessInfo {
+    const pidStr = pid.toString();
+    let stat: string;
+    try {
+      stat = fs.readFileSync(path.join(this.proc_path, pidStr, "stat"), "utf-8");
+    } catch(err) {
+      if (err.code === "ENOENT") {
+        // Process doesn't exist
+        return null;
+      } else {
+        throw err;
+      }
+    }
+    // Parse proc/pid/stat. See `man 5 proc`
+    const exeFile_start = stat.indexOf('(') + 1;
+    const exeFile_end = stat.lastIndexOf(')');
+    const ppid_start = exeFile_end + 4;
+    return {
+      processID: typeof pid === 'number'? pid : Number.parseInt(pidStr),
+      parentProcessID: Number.parseInt(stat.slice(ppid_start, stat.indexOf(' ', ppid_start))),
+      exeFile: stat.slice(exeFile_start, exeFile_end),
+    };
+  }
+
+  getProcessList(): IProcessInfo[] {
+    // Read /proc entries
+    let proc_entries: string[];
+    try {
+      proc_entries = fs.readdirSync(this.proc_path);
+    } catch (err) {
+      throw err;
+    }
+    return proc_entries.filter(this.isOnlyDigits.bind(this)).map(this.getProcessInfo.bind(this));
+  }
+}
+
+// ---- Game process monitoring ----
 class ProcessMonitor {
   private mTimer: NodeJS.Timer;
   private mStore: Redux.Store<IState>;
   private mWindow: BrowserWindow;
   private mActive: boolean = false;
+  private mImpl: IProcessMonitorImpl;
 
   constructor(api: IExtensionApi) {
     this.mStore = api.store;
+
+    if (process.platform === 'win32') {
+      this.mImpl = new ProcessMonitorImplWin32();
+    } else if (process.platform === 'linux') {
+      this.mImpl = new ProcessMonitorImplProcfs();
+    }
   }
 
   public start(): void {
-    if (winapi.GetProcessList === undefined) {
-      // Linux, MacOS
+    if (this.mImpl === undefined) {
+      // Not supported
       return;
     }
     if (this.mActive) {
@@ -74,15 +150,15 @@ class ProcessMonitor {
   }
 
   private doCheck(): void {
-    const processes = winapi.GetProcessList();
+    const processes = this.mImpl.getProcessList();
 
-    const byPid: { [pid: number]: winapi.ProcessEntry } = processes.reduce((prev, proc) => {
+    const byPid: { [pid: number]: IProcessInfo } = processes.reduce((prev, proc) => {
       prev[proc.processID] = proc;
       return prev;
     }, {});
 
-    const byName: { [exeId: string]: winapi.ProcessEntry[] } =
-      processes.reduce((prev: { [exeId: string]: winapi.ProcessEntry[] }, entry) => {
+    const byName: { [exeId: string]: IProcessInfo[] } =
+      processes.reduce((prev: { [exeId: string]: IProcessInfo[] }, entry) => {
         setdefault(prev, entry.exeFile.toLowerCase(), []).push(entry);
         return prev;
       }, {});
@@ -90,7 +166,7 @@ class ProcessMonitor {
 
     const vortexPid = process.pid;
 
-    const isChildProcess = (proc: winapi.ProcessEntry, visited: Set<number>): boolean => {
+    const isChildProcess = (proc: IProcessInfo, visited: Set<number>): boolean => {
       if ((proc === undefined) || (proc.parentProcessID === 0)) {
         return false;
       } else if (visited.has(proc.parentProcessID)) {
