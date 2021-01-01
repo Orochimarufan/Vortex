@@ -72,6 +72,7 @@
       "type": "build-copy",
       "name": "gamebryo-archive-check",
       "path": "extensions/gamebryo-archive-check",
+      "condition": "process.platform === 'win32'",
       "removeModules": ["vortex-api"],
       "sources": ["src/**/*.ts", "src/**/*.tsx", "*.json", "webpack.config.js"],
       "copyTo": "{BUILD_DIR}/bundledPlugins/gamebryo-archive-check"
