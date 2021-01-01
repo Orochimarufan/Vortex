@@ -58,7 +58,7 @@ class Steam implements IGameStore {
           this.mBaseFolder = Promise.resolve(undefined);
         }
     } else {
-      this.mBaseFolder = Promise.resolve(path.resolve(app.getPath('home'), '.steam', 'steam'));
+      this.mBaseFolder = Promise.resolve(path.resolve(app?.getPath('home') ?? process.env.HOME, '.steam', 'steam'));
     }
   }
 
