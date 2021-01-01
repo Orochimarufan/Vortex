@@ -641,6 +641,10 @@ function toBlue<T>(func: (...args: any[]) => Promise<T>): (...args: any[]) => Bl
 }
 
 function init(context: IExtensionContext): boolean {
+  if (process.platform !== "win32") {
+    log('warn', 'installer_fomod was stubbed out. It currently only supports Windows');
+    return false;
+  }
   const installWrap = async (files, scriptPath, gameId, progressDelegate) => {
     const coreDelegates = new Core(context.api, gameId);
     const stopPatterns = getStopPatterns(gameId, getGame(gameId));
