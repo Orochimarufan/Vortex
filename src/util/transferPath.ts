@@ -27,22 +27,29 @@ const MIN_DISK_SPACE_OFFSET = 512 * 1024 * 1024;
  * @param destination The proposed destination folder.
  */
 export function testPathTransfer(source: string, destination: string): Promise<void> {
-  if (process.platform !== 'win32') {
-    return Promise.reject(new UnsupportedOperatingSystem());
-  }
+  const getDestinationRoot: (string) => Promise<string> = (process.platform === "win32")
+    ? (destination: string): Promise<string> => {
+      // On Windows, ask winapi
+      try {
+        return Promise.resolve(winapi.GetVolumePathName(destination));
+      } catch (err) {
+        // On Windows, error number 2 (0x2) translates to ERROR_FILE_NOT_FOUND.
+        //  the only way for this error to be reported at this point is when
+        //  the destination path is pointing towards a non-existing partition.
+        return (err.errno === 2)
+          ? Promise.reject(new NotFound(err.path))
+          : Promise.reject(err);
+      }
+    }
+    : (destination: string): Promise<string> =>
+      // Fall back to using the first existing parent directory
+      fs.statAsync(destination)
+        .return(destination)
+        .catch(err => err.code === "ENOENT"
+          ? getDestinationRoot(path.dirname(destination))
+          : Promise.reject(err));
 
   let destinationRoot: string;
-  try {
-    destinationRoot = winapi.GetVolumePathName(destination);
-  } catch (err) {
-    // On Windows, error number 2 (0x2) translates to ERROR_FILE_NOT_FOUND.
-    //  the only way for this error to be reported at this point is when
-    //  the destination path is pointing towards a non-existing partition.
-    return (err.errno === 2)
-      ? Promise.reject(new NotFound(err.path))
-      : Promise.reject(err);
-  }
-
   const isOnSameVolume = (): Promise<boolean> => {
     return Promise.all([fs.statAsync(source), fs.statAsync(destinationRoot)])
       .then(stats => stats[0].dev === stats[1].dev);
@@ -67,7 +74,8 @@ export function testPathTransfer(source: string, destination: string): Promise<v
       log('warn', 'Transfer disk space test failed - missing source directory', err);
       return Promise.reject(new ProcessCanceled('Missing source directory'));
     })
-    .then(() => isOnSameVolume())
+    .then(() => getDestinationRoot(destination))
+    .then(destRoot => { destinationRoot = destRoot; return isOnSameVolume(); })
     .then(res => res
       ? Promise.reject(new ProcessCanceled('Disk space calculations are unnecessary.'))
       : calculate(source))

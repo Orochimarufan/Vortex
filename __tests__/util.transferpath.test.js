@@ -151,7 +151,7 @@ describe('testPathTransfer', () => {
   });
   it('fails if there is less than 512 MB free', async () => {
     du.__setCheckResult(baseB, { free: 256 * MB });
-    await expect(testPathTransfer(path.join(baseA, 'source'), path.join(baseB, 'destination'))).rejects.toThrow(`The partition "${path.sep}driveb" has insufficient space.`);
+    await expect(testPathTransfer(path.join(baseA, 'source'), path.join(baseB, 'destination'))).rejects.toThrow(new RegExp(`The partition "\\${path.sep}driveb(\\${path.sep}destination)?" has insufficient space.`));
   });
 });
 
