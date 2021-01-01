@@ -38,7 +38,7 @@ class Tracking {
         if (mod.attributes?.source === 'nexus') {
           const gameMode = activeGameId(this.mApi.getState());
           return this.mTrackedMods[gameMode]?.has?.(
-            mod.attributes?.modId.toString(),
+            mod.attributes?.modId?.toString(),
           );
         } else {
           return undefined;
